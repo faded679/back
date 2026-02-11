@@ -2,10 +2,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
+import requests
+
+BOT_TOKEN = "8448838195:AAE8LjwIESPPBJOH0NTiz3Yo4bhktZZlss0"
+CHAT_ID = "918858687"
 
 app = FastAPI()
 
-# --- CORS (обязательно для Vercel) ---
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -16,8 +19,6 @@ app.add_middleware(
 
 # --- Товары ---
 products = []
-
-# создаём 100 товаров
 for i in range(1, 101):
     products.append({
         "id": i,
@@ -25,7 +26,6 @@ for i in range(1, 101):
         "price": 100 + i
     })
 
-# --- Заказы ---
 orders = []
 order_counter = 1
 
@@ -56,24 +56,38 @@ def create_order(order: Order):
     global order_counter
 
     total = 0
+    text = f"🛒 Новый заказ №{order_counter}\n\n"
+
+    if order.username:
+        text += f"👤 @{order.username}\n"
+    if order.user_id:
+        text += f"ID: {order.user_id}\n"
+
+    text += "\nТовары:\n"
 
     for item in order.items:
         product = next((p for p in products if p["id"] == item.id), None)
         if product:
             total += product["price"] * item.quantity
+            text += f"- {product['name']} x{item.quantity}\n"
+
+    text += f"\n💰 Сумма: {total} ₽"
+
+    # --- отправка в Telegram ---
+    requests.post(
+        f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+        json={
+            "chat_id": CHAT_ID,
+            "text": text
+        }
+    )
 
     new_order = {
         "order_id": order_counter,
-        "user_id": order.user_id,
-        "username": order.username,
-        "items": order.items,
         "total_price": total
     }
 
     orders.append(new_order)
     order_counter += 1
 
-    return {
-        "order_id": new_order["order_id"],
-        "total_price": new_order["total_price"]
-    }
+    return new_order
