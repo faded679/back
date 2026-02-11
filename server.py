@@ -1,161 +1,139 @@
-from fastapi import FastAPI
-from pydantic import BaseModel
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime
-from sqlalchemy.orm import declarative_base, sessionmaker
-from datetime import datetime
-import requests
-import json
+from fastapi import FastAPI, Body
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import create_engine, Column, Integer, String, Float, Text
+from sqlalchemy.orm import sessionmaker, declarative_base
+import json
+
+# -----------------------------
+# БАЗА ДАННЫХ
+# -----------------------------
+
+DATABASE_URL = "sqlite:///./shop.db"
+
+engine = create_engine(
+    DATABASE_URL,
+    connect_args={"check_same_thread": False}
+)
+
+Session = sessionmaker(bind=engine)
+Base = declarative_base()
 
 
-BOT_TOKEN = "8448838195:AAE8LjwIESPPBJOH0NTiz3Yo4bhktZZlss0"
-ADMIN_ID = 918858687  # сюда вставь свой Telegram ID
+# -----------------------------
+# МОДЕЛИ
+# -----------------------------
+
+class Product(Base):
+    __tablename__ = "products"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String)
+    price = Column(Float)
+
+
+class Order(Base):
+    __tablename__ = "orders"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer)
+    username = Column(String)
+    items = Column(Text)  # JSON строка
+    total_price = Column(Float)
+
+
+Base.metadata.create_all(bind=engine)
+
+
+# -----------------------------
+# FASTAPI
+# -----------------------------
 
 app = FastAPI()
+
+# CORS (чтобы Mini App работал)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # для теста разрешаем всё
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
-engine = create_engine("sqlite:///shop.db")
-Session = sessionmaker(bind=engine)
-Base = declarative_base()
-
-
-# =======================
-# МОДЕЛИ
-# =======================
-
-class Product(Base):
-    __tablename__ = "products"
-
-    id = Column(Integer, primary_key=True)
-    name = Column(String)
-    price = Column(Float)
-
-
-class OrderDB(Base):
-    __tablename__ = "orders"
-
-    id = Column(Integer, primary_key=True)
-    items = Column(String)  # храним JSON строкой
-    total = Column(Float)
-    created_at = Column(DateTime, default=datetime.utcnow)
-
-
-Base.metadata.create_all(engine)
-
-
-# =======================
-# ЗАПОЛНЯЕМ ТОВАРЫ
-# =======================
+# -----------------------------
+# СИДИРОВАНИЕ ТОВАРОВ
+# -----------------------------
 
 def seed_products():
-    session = Session()
-
-    if session.query(Product).count() == 0:
-
-        sweets = [
-            ("KitKat Japan Matcha", 350),
-            ("KitKat Sakura", 370),
-            ("Reese's Peanut Butter Cups", 250),
-            ("Twizzlers Strawberry", 280),
-            ("Haribo Goldbears USA", 200),
-            ("Skittles Sour USA", 220),
-            ("Takis Fuego", 390),
-            ("Pocky Chocolate", 180),
-            ("Pocky Strawberry", 190),
-            ("Snickers Almond USA", 210),
+    db = Session()
+    if db.query(Product).count() == 0:
+        products = [
+            Product(name="KitKat Japan Matcha", price=350),
+            Product(name="KitKat Sakura", price=370),
+            Product(name="Reese's Peanut Butter Cups", price=250),
+            Product(name="Twizzlers Strawberry", price=280),
+            Product(name="Haribo Goldbears USA", price=200),
+            Product(name="Skittles Sour USA", price=220),
+            Product(name="Takis Fuego", price=390),
+            Product(name="Pocky Chocolate", price=180),
+            Product(name="Pocky Strawberry", price=190),
+            Product(name="Snickers Almond USA", price=210),
         ]
-
-        for name, price in sweets:
-            session.add(Product(name=name, price=price))
 
         # добавим ещё 100 тестовых
         for i in range(1, 101):
-            session.add(Product(
-                name=f"Импортная сладость №{i}",
-                price=100 + i
-            ))
+            products.append(
+                Product(name=f"Импортная сладость №{i}", price=100 + i)
+            )
 
-        session.commit()
-
-    session.close()
+        db.add_all(products)
+        db.commit()
+    db.close()
 
 
 seed_products()
 
 
-# =======================
-# API
-# =======================
+# -----------------------------
+# ЭНДПОИНТЫ
+# -----------------------------
 
 @app.get("/products")
 def get_products():
-    session = Session()
-    products = session.query(Product).all()
-    session.close()
-
-    return [
-        {"id": p.id, "name": p.name, "price": p.price}
-        for p in products
-    ]
+    db = Session()
+    products = db.query(Product).all()
+    db.close()
+    return products
 
 
-class Order(BaseModel):
-    items: list
-    total: float
+@app.post("/create-order")
+def create_order(data: dict = Body(...)):
+    db = Session()
 
+    items = data.get("items", [])
+    user_id = data.get("user_id")
+    username = data.get("username")
 
-@app.post("/order")
-def create_order(order: Order):
+    total = 0
 
-    session = Session()
+    for item in items:
+        product = db.query(Product).filter(Product.id == item["id"]).first()
+        if product:
+            total += product.price * item["quantity"]
 
-    # сохраняем в БД
-    db_order = OrderDB(
-        items=json.dumps(order.items, ensure_ascii=False),
-        total=order.total
+    order = Order(
+        user_id=user_id,
+        username=username,
+        items=json.dumps(items),
+        total_price=total
     )
 
-    session.add(db_order)
-    session.commit()
-    session.close()
+    db.add(order)
+    db.commit()
+    db.refresh(order)
+    db.close()
 
-    # отправляем уведомление в Telegram
-    text = f"🛒 Новый заказ!\n\nСумма: {order.total} ₽\n\n"
-
-    for item in order.items:
-        text += f"- {item['name']} × {item['qty']} ({item['price']} ₽)\n"
-
-    requests.post(
-        f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-        json={
-            "chat_id": ADMIN_ID,
-            "text": text
-        }
-    )
-
-    return {"status": "ok"}
-
-
-# посмотреть все заказы (для проверки)
-@app.get("/orders")
-def get_orders():
-    session = Session()
-    orders = session.query(OrderDB).all()
-    session.close()
-
-    return [
-        {
-            "id": o.id,
-            "items": o.items,
-            "total": o.total,
-            "created_at": o.created_at
-        }
-        for o in orders
-    ]
+    return {
+        "order_id": order.id,
+        "total_price": total
+    }
