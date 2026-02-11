@@ -7,20 +7,16 @@ import uuid
 
 app = FastAPI()
 
-# -----------------------------
-# CORS (ОБЯЗАТЕЛЬНО для Vercel)
-# -----------------------------
+# CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # позже можно заменить на домен Vercel
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# -----------------------------
-# Товары магазина
-# -----------------------------
+# Товары
 products = [
     {"id": 1, "name": "KitKat Japan Matcha", "price": 350},
     {"id": 2, "name": "KitKat Sakura", "price": 370},
@@ -31,42 +27,29 @@ products = [
     {"id": 7, "name": "Takis Fuego", "price": 390},
     {"id": 8, "name": "Pocky Chocolate", "price": 180},
     {"id": 9, "name": "Pocky Strawberry", "price": 190},
-    {"id": 10, "name": "Snickers Almond USA", "price": 210},
+    {"id": 10, "name": "Snickers Almond USA", "price": 210}
 ]
 
-# -----------------------------
-# Модель заказа
-# -----------------------------
+# Модели
 class CartItem(BaseModel):
     id: int
     name: str
     price: float
     quantity: int
 
-
 class Order(BaseModel):
     items: List[CartItem]
     total: float
 
-
-# -----------------------------
-# Хранилище заказов (временно)
-# -----------------------------
 orders = []
-
-# -----------------------------
-# Роуты
-# -----------------------------
 
 @app.get("/")
 def root():
-    return {"status": "Candy Shop API is running 🍬"}
-
+    return {"status": "API working 🍬"}
 
 @app.get("/products")
 def get_products():
     return products
-
 
 @app.post("/order")
 def create_order(order: Order):
@@ -83,11 +66,5 @@ def create_order(order: Order):
 
     return {
         "success": True,
-        "order_id": order_id,
-        "total": order.total
+        "order_id": order_id
     }
-
-
-@app.get("/orders")
-def get_orders():
-    return orders
